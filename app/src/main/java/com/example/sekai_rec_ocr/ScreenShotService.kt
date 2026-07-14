@@ -1,5 +1,6 @@
 package com.example.sekai_rec_ocr
 
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -247,10 +248,10 @@ class ScreenShotService : Service() {
                 // OCR結果の結合
                 val combinedText = StringBuilder()
                 if (resultText1.isNotBlank()) {
-                    combinedText.append("【左上エリア】\n").append(resultText1).append("\n\n")
+                    combinedText.append("【曲名エリア】\n").append(resultText1).append("\n\n")
                 }
                 if (resultText2.isNotBlank()) {
-                    combinedText.append("【左下エリア】\n").append(resultText2)
+                    combinedText.append("【判定エリア】\n").append(resultText2)
                 }
 
                 val finalResult = combinedText.toString().trim()
@@ -261,36 +262,42 @@ class ScreenShotService : Service() {
                     
                     if (token.isEmpty()) {
                         Log.d(TAG, "APIトークンが設定されていません。送信をスキップします。")
-                        showOcrNotification(finalResult, "⚠️ トークン未設定のため送信スキップ")
+                        showOcrNotification("送信スキップ: トークン未設定 ⚠️", finalResult)
                         return@addOnCompleteListener
                     }
                     
                     val isoTime = formatEpochToIso8601(screenshotInfo.dateTakenMillis)
                     
                     postOcrText(token, finalResult, isoTime) { statusCode, responseBody, error ->
-                        val statusMsg = when {
+                        val notifTitle = when {
                             error != null -> {
                                 mainHandler.post {
                                     Toast.makeText(applicationContext, "失敗: 通信エラー", Toast.LENGTH_LONG).show()
                                 }
-                                "通信エラー"
+                                "送信失敗: 通信エラー ❌"
                             }
                             statusCode == 200 -> {
                                 val toastMsg = parseSuccessToastMessage(responseBody)
                                 mainHandler.post {
                                     Toast.makeText(applicationContext, toastMsg, Toast.LENGTH_LONG).show()
                                 }
-                                "保存完了"
+                                val songTitle = parseSongTitleValue(responseBody) ?: "曲名不明"
+                                val difficulty = parseDifficultyValue(responseBody) ?: "不明"
+                                val great = parseValue(responseBody, "great")
+                                val good = parseValue(responseBody, "good")
+                                val bad = parseValue(responseBody, "bad")
+                                val miss = parseValue(responseBody, "miss")
+                                "$songTitle【$difficulty】($great-$good-$bad-$miss)"
                             }
                             else -> {
                                 val errDetail = parseErrorDetail(responseBody) ?: "HTTP $statusCode"
                                 mainHandler.post {
                                     Toast.makeText(applicationContext, "失敗: $errDetail", Toast.LENGTH_LONG).show()
                                 }
-                                "送信エラー: $errDetail"
+                                "送信失敗: $errDetail ❌"
                             }
                         }
-                        showOcrNotification(finalResult, statusMsg)
+                        showOcrNotification(notifTitle, finalResult)
                     }
                 } else {
                     Log.d(TAG, "OCRで有効な文字が検出されませんでした")
@@ -453,6 +460,13 @@ class ScreenShotService : Service() {
      * 現在フォアグラウンドにいるアプリが指定のターゲットアプリ（プロセカ）か判定する
      */
     private fun isTargetAppForeground(): Boolean {
+        // もし画面固定（LockTaskMode / アプリピン留め）が有効な場合は、判定制限をバイパスして常にtrueを返す
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        if (activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE) {
+            Log.d(TAG, "画面固定モード（App Pinning）が有効なため、フォアグラウンド判定をバイパスします")
+            return true
+        }
+
         val usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val time = System.currentTimeMillis()
 
@@ -562,25 +576,45 @@ class ScreenShotService : Service() {
     }
 
     /**
+     * レスポンスボディから曲名（songTitle）を正規表現で抽出
+     */
+    private fun parseSongTitleValue(responseBody: String?): String? {
+        if (responseBody.isNullOrBlank()) return null
+        val regex = "\"songTitle\"\\s*:\\s*\"([^\"]+)\"".toRegex(RegexOption.IGNORE_CASE)
+        return regex.find(responseBody)?.groups?.get(1)?.value
+    }
+
+    /**
+     * レスポンスボディから難易度（difficulty）を正規表現で抽出
+     */
+    private fun parseDifficultyValue(responseBody: String?): String? {
+        if (responseBody.isNullOrBlank()) return null
+        val regex = "\"difficulty\"\\s*:\\s*\"([^\"]+)\"".toRegex(RegexOption.IGNORE_CASE)
+        return regex.find(responseBody)?.groups?.get(1)?.value
+    }
+
+    /**
+     * レスポンスボディから特定のキー（great, good, bad, missなど）の数値を正規表現で抽出
+     */
+    private fun parseValue(responseBody: String?, key: String): String {
+        if (responseBody.isNullOrBlank()) return "-"
+        val regex = "\"$key\"\\s*:\\s*\"?(\\d+)\"?".toRegex(RegexOption.IGNORE_CASE)
+        return regex.find(responseBody)?.groups?.get(1)?.value ?: "-"
+    }
+
+    /**
      * レスポンスボディから曲情報と判定結果を抽出してトーストメッセージを作成
      */
     private fun parseSuccessToastMessage(responseBody: String?): String {
         if (responseBody.isNullOrBlank()) return "成功 (詳細不明)"
         
-        val titleRegex = "\"songTitle\"\\s*:\\s*\"([^\"]+)\"".toRegex(RegexOption.IGNORE_CASE)
-        val diffRegex = "\"difficulty\"\\s*:\\s*\"([^\"]+)\"".toRegex(RegexOption.IGNORE_CASE)
-        val greatRegex = "\"great\"\\s*:\\s*\"?(\\d+)\"?".toRegex(RegexOption.IGNORE_CASE)
-        val goodRegex = "\"good\"\\s*:\\s*\"?(\\d+)\"?".toRegex(RegexOption.IGNORE_CASE)
-        val badRegex = "\"bad\"\\s*:\\s*\"?(\\d+)\"?".toRegex(RegexOption.IGNORE_CASE)
-        val missRegex = "\"miss\"\\s*:\\s*\"?(\\d+)\"?".toRegex(RegexOption.IGNORE_CASE)
+        val songTitle = parseSongTitleValue(responseBody) ?: "曲名不明"
+        val difficulty = parseDifficultyValue(responseBody)
         
-        val songTitle = titleRegex.find(responseBody)?.groups?.get(1)?.value ?: "曲名不明"
-        val difficulty = diffRegex.find(responseBody)?.groups?.get(1)?.value
-        
-        val great = greatRegex.find(responseBody)?.groups?.get(1)?.value ?: "-"
-        val good = goodRegex.find(responseBody)?.groups?.get(1)?.value ?: "-"
-        val bad = badRegex.find(responseBody)?.groups?.get(1)?.value ?: "-"
-        val miss = missRegex.find(responseBody)?.groups?.get(1)?.value ?: "-"
+        val great = parseValue(responseBody, "great")
+        val good = parseValue(responseBody, "good")
+        val bad = parseValue(responseBody, "bad")
+        val miss = parseValue(responseBody, "miss")
         
         return if (difficulty != null) {
             "成功: $songTitle $difficulty($great-$good-$bad-$miss)"
@@ -589,22 +623,16 @@ class ScreenShotService : Service() {
         }
     }
 
-    /**
-     * OCRで認識された文字列を通知領域に表示する
-     */
-    private fun showOcrNotification(text: String, apiStatus: String? = null) {
+    private fun showOcrNotification(title: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
         
         // 改行をスペースに変換したプレビュー用テキストを作成
         val previewText = text.replace("\n", " ")
-        val contentText = if (apiStatus != null) "[$apiStatus] $previewText" else previewText
 
         val ocrNotification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("【OCR文字認識結果】")
-            .setContentText(contentText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(
-                if (apiStatus != null) "【API送信ステータス: $apiStatus】\n\n$text" else text
-            )) // 展開時にAPIステータスも含めて表示
+            .setContentTitle(title)
+            .setContentText(previewText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text)) // 展開時に全文表示
             .setSmallIcon(android.R.drawable.ic_menu_agenda)
             .setAutoCancel(true) // タップ時に自動で通知を消去
             .build()

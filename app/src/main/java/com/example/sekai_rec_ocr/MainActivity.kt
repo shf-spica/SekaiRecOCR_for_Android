@@ -331,7 +331,7 @@ class MainActivity : AppCompatActivity() {
 
         // 8. アプリ説明
         descTextView = TextView(this).apply {
-            text = "プロセカのプレイ中にスクリーンショットを撮影すると、自動的に画面の左上・左下を検知して日本語文字認識(OCR)を行い、結果を通知します。"
+            text = "プロジェクトセカイ カラフルステージのリザルト画面を解析し、SEKAI recorderに送信します。"
             textSize = 13f
             setTextColor(android.graphics.Color.LTGRAY)
             gravity = Gravity.CENTER
@@ -375,7 +375,7 @@ class MainActivity : AppCompatActivity() {
             actionButton.setOnClickListener {
                 requestUsageStatsPermission()
             }
-            descTextView.text = "現在プレイ中のゲーム（プロセカ）を認識するために「使用状況へのアクセス」許可が必要です。"
+            descTextView.text = "現在プレイ中のゲームを認識するために「使用状況へのアクセス」許可が必要です。"
         } else {
             // 全て権限クリアしている場合、サービスの状態をチェック
             val isRunning = isServiceRunning(ScreenShotService::class.java)
@@ -398,7 +398,7 @@ class MainActivity : AppCompatActivity() {
                     updateUiState()
                 }
             }
-            descTextView.text = "プロセカのプレイ中にスクリーンショットを撮影すると、自動的に画面の左上・左下を検知して日本語文字認識(OCR)を行い、結果を通知します。"
+            descTextView.text = "powered by ML Kit Text Recognition v2"
         }
     }
 
@@ -515,10 +515,10 @@ class MainActivity : AppCompatActivity() {
                     // 結果の結合
                     val combinedText = StringBuilder()
                     if (resultText1.isNotBlank()) {
-                        combinedText.append("【左上エリア】\n").append(resultText1).append("\n\n")
+                        combinedText.append("【曲名エリア】\n").append(resultText1).append("\n\n")
                     }
                     if (resultText2.isNotBlank()) {
-                        combinedText.append("【左下エリア】\n").append(resultText2)
+                        combinedText.append("【判定エリア】\n").append(resultText2)
                     }
 
                     val finalResult = combinedText.toString().trim()
