@@ -1,3 +1,3 @@
-# SEKAI rec OCR fo Android
+# SEKAI rec OCR for Android
 
 準備中
